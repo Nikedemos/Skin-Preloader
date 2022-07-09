@@ -8,8 +8,8 @@ using System.Text;
 
 namespace Oxide.Plugins
 {
-    [Info("Skin Preloader", "Nikedemos", "1.0.0")]
-    [Description("Forces connected players to download and cache custom Steam Workshop skin IDs immediately after spawning so they can be used for icons as soon as possible")]
+    [Info("Skin Preloader", "Nikedemos", "1.0.1")]
+    [Description("Forces players to download and cache custom Steam Workshop skin IDs immediately after connecting so they can be used for icons as soon as possible")]
     public class SkinPreloader : RustPlugin
     {
         #region CONST/STATIC
@@ -34,7 +34,7 @@ namespace Oxide.Plugins
         public static string PERMISSION_ADMIN;
         #endregion
 
-        #region HOOKS
+        #region HOOK SUBSCRIPTIONS
         void OnServerInitialized()
         {
             Instance = this;
@@ -45,9 +45,8 @@ namespace Oxide.Plugins
 
             LoadConfigData();
 
-
-            PERMISSION_OPT_OUT = $"{nameof(SkinPreloader).ToLower()}.{PERM_SUFFIX_OPT_OUT}";
-            PERMISSION_ADMIN = $"{nameof(SkinPreloader).ToLower()}.{PERM_SUFFIX_ADMIN}";
+            PERMISSION_OPT_OUT = $"{Name.ToLower()}.{PERM_SUFFIX_OPT_OUT}";
+            PERMISSION_ADMIN = $"{Name.ToLower()}.{PERM_SUFFIX_ADMIN}";
 
             permission.RegisterPermission(PERMISSION_OPT_OUT, this);
             permission.RegisterPermission(PERMISSION_ADMIN, this);
@@ -58,9 +57,6 @@ namespace Oxide.Plugins
             AddCovalenceCommand(CMD_REMOVE_ALL, nameof(CommandClear), PERMISSION_ADMIN);
 
             DummyGuiManager.OnServerInitialized();
-
-            //add defaults if missing
-            ProcessConfigData();
         }
 
         void Unload()
@@ -72,7 +68,7 @@ namespace Oxide.Plugins
             ItemRugID = 0;
         }
 
-        void OnPlayerSleepEnded(BasePlayer player)
+        void OnPlayerConnected(BasePlayer player)
         {
             if (Instance == null)
             {
@@ -88,10 +84,10 @@ namespace Oxide.Plugins
         public const string MSG_PLEASE_PROVIDE_AT_LEAST_1_VALID = nameof(MSG_PLEASE_PROVIDE_AT_LEAST_1_VALID);
         public const string MSG_OK_ADDED_SKIN_ID = nameof(MSG_OK_ADDED_SKIN_ID);
         public const string MSG_OK_REMOVED_SKIN_ID = nameof(MSG_OK_REMOVED_SKIN_ID);
-        public const string MSG_SKIN_ALREADY_EXISTS = nameof(MSG_SKIN_ALREADY_EXISTS);
+        public const string MSG_ERROR_SKIN_ALREADY_EXISTS = nameof(MSG_ERROR_SKIN_ALREADY_EXISTS);
         public const string MSG_ERROR_SKIN_DOESNT_EXIST = nameof(MSG_ERROR_SKIN_DOESNT_EXIST);
 
-        public const string MSG_SKIN_INVALID = nameof(MSG_SKIN_INVALID);
+        public const string MSG_ERROR_SKIN_INVALID = nameof(MSG_ERROR_SKIN_INVALID);
 
         public const string MSG_REGENERATING_CACHE_LIST = nameof(MSG_REGENERATING_CACHE_LIST);
 
@@ -106,12 +102,12 @@ namespace Oxide.Plugins
             [MSG_OK_ADDED_SKIN_ID] = "OK: Added skin ID {0}",
             [MSG_OK_REMOVED_SKIN_ID] = "OK: Removed skin ID {0}",
 
-            [MSG_SKIN_ALREADY_EXISTS] = "ERROR: skin ID {0} already exists",
+            [MSG_ERROR_SKIN_ALREADY_EXISTS] = "ERROR: skin ID {0} already exists",
             [MSG_ERROR_SKIN_DOESNT_EXIST] = "ERROR: skin ID {0} doesn't exist",
 
-            [MSG_SKIN_INVALID] = "ERROR: {0} is not a valid skin ID",
+            [MSG_ERROR_SKIN_INVALID] = "ERROR: {0} is not a valid skin ID",
 
-            [MSG_REGENERATING_CACHE_LIST] = "Regenerating cache list...",
+            [MSG_REGENERATING_CACHE_LIST] = "Regenerating cache list and saving data...",
 
             [MSG_NO_SKIN_IDS_EXIST] = "There's no skin IDs registered",
             [MSG_FOLLOWING_SKIN_IDS_EXIST] = "The following skin IDs are registered:",
@@ -162,8 +158,7 @@ namespace Oxide.Plugins
             iplayer.Reply(builder.ToString());
         }
 
-        [Command(CMD_ADD)]
-        private void CommandAdd(IPlayer iplayer, string command, string[] args)
+        internal void CommandAddOrRemove(IPlayer iplayer, string command, string[] args)
         {
             if (args.Length == 0)
             {
@@ -171,25 +166,28 @@ namespace Oxide.Plugins
                 return;
             }
 
+            bool addingNotRemoving = command == CMD_ADD;
+
             if (args.Length == 1)
             {
-                //add single
                 ulong skinID;
 
                 if (ulong.TryParse(args[0], out skinID))
                 {
-                    if (SkinAddSingle(skinID))
+                    bool conditionMet = addingNotRemoving ? SkinAddSingle(skinID) : SkinRemoveSingle(skinID);
+
+                    if (conditionMet)
                     {
-                        iplayer.Reply(MSG(MSG_OK_ADDED_SKIN_ID, iplayer.Id, args[0]));
+                        iplayer.Reply(MSG(addingNotRemoving ? MSG_OK_ADDED_SKIN_ID : MSG_OK_REMOVED_SKIN_ID, iplayer.Id, args[0]));
                     }
                     else
                     {
-                        iplayer.Reply(MSG(MSG_SKIN_ALREADY_EXISTS, iplayer.Id, args[0]));
+                        iplayer.Reply(MSG(addingNotRemoving ? MSG_ERROR_SKIN_ALREADY_EXISTS : MSG_ERROR_SKIN_DOESNT_EXIST, iplayer.Id, args[0]));
                     }
                 }
                 else
                 {
-                    iplayer.Reply(MSG(MSG_SKIN_INVALID, iplayer.Id, args[0]));
+                    iplayer.Reply(MSG(MSG_ERROR_SKIN_INVALID, iplayer.Id, args[0]));
                 }
             }
             else
@@ -209,22 +207,23 @@ namespace Oxide.Plugins
                 if (skinList.Count == 0)
                 {
                     iplayer.Reply(MSG(MSG_PLEASE_PROVIDE_AT_LEAST_1_VALID, iplayer.Id));
+                    Facepunch.Pool.FreeList(ref skinList);
                     return;
                 }
 
-                var addingResult = SkinAddRange(skinList);
+                var result = addingNotRemoving ? SkinAddRange(skinList) : SkinRemoveRange(skinList);
 
                 StringBuilder builder = new StringBuilder();
 
-                for (var i = 0; i< addingResult.Length; i++)
+                for (var i = 0; i < result.Length; i++)
                 {
-                    if (addingResult[i])
+                    if (result[i])
                     {
-                        iplayer.Reply(MSG(MSG_OK_ADDED_SKIN_ID, iplayer.Id, skinList[i]));
+                        iplayer.Reply(MSG(addingNotRemoving ? MSG_OK_ADDED_SKIN_ID : MSG_OK_REMOVED_SKIN_ID , iplayer.Id, skinList[i]));
                     }
                     else
                     {
-                        iplayer.Reply(MSG(MSG_SKIN_ALREADY_EXISTS, iplayer.Id, skinList[i]));
+                        iplayer.Reply(MSG(addingNotRemoving ? MSG_ERROR_SKIN_ALREADY_EXISTS : MSG_ERROR_SKIN_DOESNT_EXIST, iplayer.Id, skinList[i]));
                     }
                 }
 
@@ -233,78 +232,12 @@ namespace Oxide.Plugins
                 iplayer.Reply(builder.ToString());
             }
         }
+
+        [Command(CMD_ADD)]
+        private void CommandAdd(IPlayer iplayer, string command, string[] args) => CommandAddOrRemove(iplayer, command, args);
 
         [Command(CMD_REMOVE)]
-        private void CommandRemove(IPlayer iplayer, string command, string[] args)
-        {
-            if (args.Length == 0)
-            {
-                iplayer.Reply(MSG(MSG_PLEASE_PROVIDE_AT_LEAST_1_VALID, iplayer.Id));
-                return;
-            }
-
-            if (args.Length == 1)
-            {
-                //add single
-                ulong skinID;
-
-                if (ulong.TryParse(args[0], out skinID))
-                {
-                    if (SkinRemoveSingle(skinID))
-                    {
-                        iplayer.Reply(MSG(MSG_OK_REMOVED_SKIN_ID, iplayer.Id, args[0]));
-                    }
-                    else
-                    {
-                        iplayer.Reply(MSG(MSG_ERROR_SKIN_DOESNT_EXIST, iplayer.Id, args[0]));
-                    }
-                }
-                else
-                {
-                    iplayer.Reply(MSG(MSG_SKIN_INVALID, iplayer.Id, args[0]));
-                }
-            }
-            else
-            {
-                var skinList = Facepunch.Pool.GetList<ulong>();
-
-                for (var i = 0; i < args.Length; i++)
-                {
-                    ulong skinID;
-
-                    if (ulong.TryParse(args[i], out skinID))
-                    {
-                        skinList.Add(skinID);
-                    }
-                }
-
-                if (skinList.Count == 0)
-                {
-                    iplayer.Reply(MSG(MSG_PLEASE_PROVIDE_AT_LEAST_1_VALID, iplayer.Id));
-                    return;
-                }
-
-                var removingResult = SkinRemoveRange(skinList);
-
-                StringBuilder builder = new StringBuilder();
-
-                for (var i = 0; i < removingResult.Length; i++)
-                {
-                    if (removingResult[i])
-                    {
-                        iplayer.Reply(MSG(MSG_OK_REMOVED_SKIN_ID, iplayer.Id, skinList[i]));
-                    }
-                    else
-                    {
-                        iplayer.Reply(MSG(MSG_ERROR_SKIN_DOESNT_EXIST, iplayer.Id, skinList[i]));
-                    }
-                }
-
-                Facepunch.Pool.FreeList(ref skinList);
-
-                iplayer.Reply(builder.ToString());
-            }
-        }
+        private void CommandRemove(IPlayer iplayer, string command, string[] args) => CommandAddOrRemove(iplayer, command, args);
 
         [Command(CMD_REMOVE_ALL)]
         private void CommandClear(IPlayer iplayer, string command, string[] args)
@@ -341,50 +274,6 @@ namespace Oxide.Plugins
             return true;
         }
 
-        [HookMethod(nameof(SkinAddRange))]
-        public bool[] SkinAddRange(IEnumerable<ulong> skinIDs)
-        {
-            if (skinIDs == null)
-            {
-                return null;
-            }
-
-            if (!skinIDs.Any())
-            {
-                return null;
-            }
-
-            List<bool> resultsList = Facepunch.Pool.GetList<bool>();
-
-            bool needsUpdate = false;
-
-            foreach (var skinID in skinIDs)
-            {
-                if (Configuration.SkinList.Contains(skinID))
-                {
-                    resultsList.Add(false);
-                }
-                else
-                {
-                    needsUpdate = true;
-                    Configuration.SkinList.Add(skinID);
-
-                    resultsList.Add(true);
-                }
-            }
-
-            if (needsUpdate)
-            {
-                DummyGuiManager.Regenerate();
-            }
-
-            bool[] results = resultsList.ToArray();
-
-            Facepunch.Pool.FreeList(ref resultsList);
-
-            return results;
-        }
-
         [HookMethod(nameof(SkinRemoveSingle))]
         public bool SkinRemoveSingle(ulong skinID)
         {
@@ -398,8 +287,7 @@ namespace Oxide.Plugins
             return true;
         }
 
-        [HookMethod(nameof(SkinRemoveRange))]
-        public bool[] SkinRemoveRange(IEnumerable<ulong> skinIDs)
+        internal bool[] SkinAddOrRemoveRange(bool addingNotRemoving, IEnumerable<ulong> skinIDs)
         {
             if (skinIDs == null)
             {
@@ -417,16 +305,23 @@ namespace Oxide.Plugins
 
             foreach (var skinID in skinIDs)
             {
-                if (!Configuration.SkinList.Contains(skinID))
-                {
-                    resultsList.Add(false);
-                }
-                else
+                bool contains = Configuration.SkinList.Contains(skinID);
+                bool conditionMet = addingNotRemoving ? contains : !contains;
+
+                resultsList.Add(conditionMet);
+
+                if (conditionMet)
                 {
                     needsUpdate = true;
-                    Configuration.SkinList.Remove(skinID);
 
-                    resultsList.Add(true);
+                    if (addingNotRemoving)
+                    {
+                        Configuration.SkinList.Add(skinID);
+                    }
+                    else
+                    {
+                        Configuration.SkinList.Remove(skinID);
+                    }
                 }
             }
 
@@ -441,6 +336,12 @@ namespace Oxide.Plugins
 
             return results;
         }
+
+        [HookMethod(nameof(SkinAddRange))]
+        public bool[] SkinAddRange(IEnumerable<ulong> skinIDs) => SkinAddOrRemoveRange(true, skinIDs);
+
+        [HookMethod(nameof(SkinRemoveRange))]
+        public bool[] SkinRemoveRange(IEnumerable<ulong> skinIDs) => SkinAddOrRemoveRange(false, skinIDs);
 
         [HookMethod(nameof(SkinRemoveAll))]
         public int SkinRemoveAll()
@@ -484,39 +385,6 @@ namespace Oxide.Plugins
         protected override void LoadDefaultConfig()
         {
             RestoreDefaultConfig();
-        }
-
-        private void ProcessConfigData()
-        {
-            if (Configuration.PopulateEmptyListWithDefaultsOnReload)
-            {
-                if (Configuration.SkinList.Count == 0)
-                {
-                    SkinAddRange(new List<ulong>
-                    {
-                        //Vehicle Airdrops
-                        2144524645,
-                        2144547783,
-                        2146665840,
-                        2144560388,
-                        2144555007,
-                        2144558893,
-                        2567551241,
-                        2567552797,
-                        2756133263,
-                        2756136166,
-
-                        //Water Bases
-                        2484982352,
-                        2485021365,
-
-                        //Grappling Hook
-                        2387182643,
-                    });
-                }
-            }
-
-
         }
 
         private void LoadConfigData()
@@ -568,19 +436,13 @@ namespace Oxide.Plugins
                 DummyParent = new CuiElement
                 {
                     Name = ELEMENT_PARENT_NAME,
-                    Parent = "Overlay",
+                    Parent = "Hud",
                     Components =
                     {
-                        new CuiImageComponent
-                        {
-                            
-                        },
                         new CuiRectTransformComponent
                         {
-                            AnchorMin = "0.5 0.5",
-                            AnchorMax = "0.5 0.5",
-                            OffsetMin = "-10001 -10001",
-                            OffsetMax = "-10000 -10000",
+                            AnchorMin = "6 9", //nice.
+                            AnchorMax = "6 9",
                         }
                     }
                 };
@@ -639,7 +501,6 @@ namespace Oxide.Plugins
 
                 }
 
-                //re-bake it
                 DummyContainerJSON = DummyContainer.ToJson();
 
                 Instance.SaveConfigData();
