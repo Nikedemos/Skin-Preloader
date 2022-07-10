@@ -306,7 +306,7 @@ namespace Oxide.Plugins
             foreach (var skinID in skinIDs)
             {
                 bool contains = Configuration.SkinList.Contains(skinID);
-                bool conditionMet = addingNotRemoving ? contains : !contains;
+                bool conditionMet = addingNotRemoving ? !contains : contains;
 
                 resultsList.Add(conditionMet);
 
