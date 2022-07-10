@@ -16,10 +16,10 @@ Preloading happens for all players without the opt-out permission...
 * when skins are added/removed with commands/hooks (see below).
 
 # Permissions
-> *** skinpreloader.admin**
+> * **skinpreloader.admin**
 > When you run any of the Admin Commands below as a player (from chat/F1 console), you need this permission.
 
-> *** skinpreloader.opt_out**
+> * **skinpreloader.opt_out**
 > Grant this permission to players/groups that don't deserve to bask in the glory of instantly available custom skins.
 
 # Configuration
