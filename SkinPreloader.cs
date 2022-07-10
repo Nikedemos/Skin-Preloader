@@ -9,7 +9,7 @@ using System.Text;
 namespace Oxide.Plugins
 {
     [Info("Skin Preloader", "Nikedemos", "1.0.1")]
-    [Description("Forces players to download and cache custom Steam Workshop skin IDs immediately after connecting so they can be used for icons as soon as possible")]
+    [Description("Forces players to download and cache custom skins immediately after connecting for UI/icon usage")]
     public class SkinPreloader : RustPlugin
     {
         #region CONST/STATIC
@@ -379,7 +379,6 @@ namespace Oxide.Plugins
         public class ConfigData
         {
             public List<ulong> SkinList = new List<ulong>();
-            public bool PopulateEmptyListWithDefaultsOnReload = true;
         }
 
         protected override void LoadDefaultConfig()
